@@ -53,6 +53,25 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
 
+
+#include <pcl/visualization/cloud_viewer.h>
+#include <pcl/visualization/pcl_visualizer.h>
+// #include <pcl/console/parse.h>
+// #include <pcl/io/pcd_io.h>
+// #include <pcl/sample_consensus/ransac.h>
+// #include <pcl/sample_consensus/sac_model_normal_sphere.h>
+// #include <pcl/sample_consensus/sac_model_cylinder.h>
+// #include <pcl/features/normal_3d.h>
+// #include <pcl/features/principal_curvatures.h>
+// #include <pcl/sample_consensus/method_types.h>
+// #include <pcl/sample_consensus/model_types.h>
+// #include <pcl/segmentation/sac_segmentation.h>
+// #include <pcl/segmentation/region_growing.h>
+// #include <pcl/segmentation/extract_clusters.h>
+// #include <pcl/features/moment_of_inertia_estimation.h>
+
+#include "../include/aloam_velodyne/scanRegistration.hpp"
+
 using std::atan2;
 using std::cos;
 using std::sin;
@@ -62,7 +81,7 @@ const double scanPeriod = 0.1;
 const int systemDelay = 0; 
 int systemInitCount = 0;
 bool systemInited = false;
-int N_SCANS = 0;
+int N_SCANS = 64;
 float cloudCurvature[400000];
 int cloudSortInd[400000];
 int cloudNeighborPicked[400000];
@@ -111,18 +130,18 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
     cloud_out.is_dense = true;
 }
 
-void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
+std::vector<pcl::PointCloud<PointType>> laserCloudHandler(const pcl::PointCloud<pcl::PointXYZ>& laserCloudMsg)
 {
-    if (!systemInited)
-    { 
-        systemInitCount++;
-        if (systemInitCount >= systemDelay)
-        {
-            systemInited = true;
-        }
-        else
-            return;
-    }
+    // if (!systemInited)
+    // { 
+    //     systemInitCount++;
+    //     if (systemInitCount >= systemDelay)
+    //     {
+    //         systemInited = true;
+    //     }
+    //     else
+    //         return;
+    // }
 
     TicToc t_whole;
     TicToc t_prepare;
@@ -130,7 +149,9 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     std::vector<int> scanEndInd(N_SCANS, 0);
 
     pcl::PointCloud<pcl::PointXYZ> laserCloudIn;
-    pcl::fromROSMsg(*laserCloudMsg, laserCloudIn);
+    // pcl::fromROSMsg(*laserCloudMsg, laserCloudIn);
+    laserCloudIn = laserCloudMsg;
+
     std::vector<int> indices;
 
     pcl::removeNaNFromPointCloud(laserCloudIn, laserCloudIn, indices);
@@ -265,13 +286,14 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         cloudLabel[i] = 0;
     }
 
-
     TicToc t_pts;
 
     pcl::PointCloud<PointType> cornerPointsSharp;
     pcl::PointCloud<PointType> cornerPointsLessSharp;
     pcl::PointCloud<PointType> surfPointsFlat;
     pcl::PointCloud<PointType> surfPointsLessFlat;
+
+    std::vector<pcl::PointCloud<PointType>> testResult;
 
     float t_q_sort = 0;
     for (int i = 0; i < N_SCANS; i++)
@@ -406,98 +428,126 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 
         surfPointsLessFlat += surfPointsLessFlatScanDS;
     }
-    printf("sort q time %f \n", t_q_sort);
-    printf("seperate points time %f \n", t_pts.toc());
+    // printf("sort q time %f \n", t_q_sort);
+    // printf("seperate points time %f \n", t_pts.toc());
 
+    // printf("scanRegistration: laserCloudIn = %ld  cornerPointsSharp.size() = %ld  cornerPointsLessSharp.size() = %ld   surfPointsFlat.size() = %ld   surfPointsLessFlat.size() = %ld \n",
+    //         laserCloudIn.size(),cornerPointsSharp.size(),cornerPointsLessSharp.size(),surfPointsFlat.size(),surfPointsLessFlat.size());
 
-    sensor_msgs::PointCloud2 laserCloudOutMsg;
-    pcl::toROSMsg(*laserCloud, laserCloudOutMsg);
-    laserCloudOutMsg.header.stamp = laserCloudMsg->header.stamp;
-    laserCloudOutMsg.header.frame_id = "/camera_init";
-    pubLaserCloud.publish(laserCloudOutMsg);
+    // printf("scan registration time %f ms *************\n", t_whole.toc());
+    // if(t_whole.toc() > 100)
+    //     ROS_WARN("scan registration process over 100ms");
+    
+    testResult.push_back(surfPointsFlat);
+    testResult.push_back(surfPointsLessFlat);
 
-    sensor_msgs::PointCloud2 cornerPointsSharpMsg;
-    pcl::toROSMsg(cornerPointsSharp, cornerPointsSharpMsg);
-    cornerPointsSharpMsg.header.stamp = laserCloudMsg->header.stamp;
-    cornerPointsSharpMsg.header.frame_id = "/camera_init";
-    pubCornerPointsSharp.publish(cornerPointsSharpMsg);
-
-    sensor_msgs::PointCloud2 cornerPointsLessSharpMsg;
-    pcl::toROSMsg(cornerPointsLessSharp, cornerPointsLessSharpMsg);
-    cornerPointsLessSharpMsg.header.stamp = laserCloudMsg->header.stamp;
-    cornerPointsLessSharpMsg.header.frame_id = "/camera_init";
-    pubCornerPointsLessSharp.publish(cornerPointsLessSharpMsg);
-
-    sensor_msgs::PointCloud2 surfPointsFlat2;
-    pcl::toROSMsg(surfPointsFlat, surfPointsFlat2);
-    surfPointsFlat2.header.stamp = laserCloudMsg->header.stamp;
-    surfPointsFlat2.header.frame_id = "/camera_init";
-    pubSurfPointsFlat.publish(surfPointsFlat2);
-
-    sensor_msgs::PointCloud2 surfPointsLessFlat2;
-    pcl::toROSMsg(surfPointsLessFlat, surfPointsLessFlat2);
-    surfPointsLessFlat2.header.stamp = laserCloudMsg->header.stamp;
-    surfPointsLessFlat2.header.frame_id = "/camera_init";
-    pubSurfPointsLessFlat.publish(surfPointsLessFlat2);
-
-    // pub each scam
-    if(PUB_EACH_LINE)
-    {
-        for(int i = 0; i< N_SCANS; i++)
-        {
-            sensor_msgs::PointCloud2 scanMsg;
-            pcl::toROSMsg(laserCloudScans[i], scanMsg);
-            scanMsg.header.stamp = laserCloudMsg->header.stamp;
-            scanMsg.header.frame_id = "/camera_init";
-            pubEachScan[i].publish(scanMsg);
-        }
-    }
-
-    printf("scan registration time %f ms *************\n", t_whole.toc());
-    if(t_whole.toc() > 100)
-        ROS_WARN("scan registration process over 100ms");
+    return testResult;
 }
 
-int main(int argc, char **argv)
+bool displayCloud(const pcl::PointCloud<TYPENAME>::Ptr cloud_input,
+                  const pcl::PointCloud<TYPENAME>::Ptr cloud_target)
 {
-    ros::init(argc, argv, "scanRegistration");
-    ros::NodeHandle nh;
+    boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(new pcl::visualization::PCLVisualizer("Cloud Viewer"));
+    pcl::visualization::PointCloudColorHandlerCustom<TYPENAME> input_cloud_color(cloud_input, 0, 255, 0);
+    pcl::visualization::PointCloudColorHandlerCustom<TYPENAME> target_cloud_color(cloud_target, 255, 0, 0);
+    viewer->setBackgroundColor(0, 0, 0);
+    viewer->addPointCloud<TYPENAME>(cloud_input,input_cloud_color,"cloud_input");
+    viewer->addPointCloud<TYPENAME>(cloud_target, target_cloud_color, "cloud_target");
 
-    nh.param<int>("scan_line", N_SCANS, 16);
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud_input");
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud_target");
 
-    nh.param<double>("minimum_range", MINIMUM_RANGE, 0.1);
+    viewer->spin();
 
-    printf("scan line number %d \n", N_SCANS);
-
-    if(N_SCANS != 16 && N_SCANS != 32 && N_SCANS != 64)
-    {
-        printf("only support velodyne with 16, 32 or 64 scan line!");
-        return 0;
-    }
-
-    ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 100, laserCloudHandler);
-
-    pubLaserCloud = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
-
-    pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 100);
-
-    pubCornerPointsLessSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 100);
-
-    pubSurfPointsFlat = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_flat", 100);
-
-    pubSurfPointsLessFlat = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_flat", 100);
-
-    pubRemovePoints = nh.advertise<sensor_msgs::PointCloud2>("/laser_remove_points", 100);
-
-    if(PUB_EACH_LINE)
-    {
-        for(int i = 0; i < N_SCANS; i++)
-        {
-            ros::Publisher tmp = nh.advertise<sensor_msgs::PointCloud2>("/laser_scanid_" + std::to_string(i), 100);
-            pubEachScan.push_back(tmp);
-        }
-    }
-    ros::spin();
-
-    return 0;
+    return true;
 }
+
+// void calculateNormalAngle(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,std::vector<double>& normalBuf)
+void calculateNormalAngle(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,std::vector<double>& normalBuf)
+{
+    pcl::NormalEstimationOMP<pcl::PointXYZI, pcl::Normal> n;//OMP加速
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+
+    //建立kdtree来进行近邻点集搜索
+    pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
+    n.setNumberOfThreads(10);//设置openMP的线程数
+    //n.setViewPoint(0,0,0);//设置视点，默认为（0，0，0）
+    n.setInputCloud(cloud);
+    n.setSearchMethod(tree);
+    n.setKSearch(20);//点云法向计算时，需要所搜的近邻点大小
+    //n.setRadiusSearch(0.03);//半径搜素
+    n.compute(*normals);//开始进行法向计
+
+    //计算夹角
+    for(size_t i = 0;i < normals->size();i++)
+    {
+        Eigen::Vector3f v1(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
+        Eigen::Vector3f v2(normals->points[i].normal_x,normals->points[i].normal_y,normals->points[i].normal_z);
+        normalBuf.push_back(pcl::getAngle3D(v1,v2,false));
+    }
+
+}
+
+// int main(int argc, char **argv)
+// {
+//     ros::init(argc, argv, "scanRegistration");
+//     ros::NodeHandle nh;
+
+//     nh.param<int>("scan_line", N_SCANS, 16);
+
+//     nh.param<double>("minimum_range", MINIMUM_RANGE, 0.1);
+
+//     printf("scan line number %d \n", N_SCANS);
+
+//     if(N_SCANS != 16 && N_SCANS != 32 && N_SCANS != 64)
+//     {
+//         printf("only support velodyne with 16, 32 or 64 scan line!");
+//         return 0;
+//     }
+
+    // std::string file_name_1 = "/home/renxiao/catkin_ws/src/A-LOAM/data/1.pcd";
+    // std::string file_name_2 = "/home/renxiao/catkin_ws/src/A-LOAM/data/2.pcd";
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_input(new pcl::PointCloud<pcl::PointXYZ>);
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_target(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // if(pcl::io::loadPCDFile<pcl::PointXYZ>(file_name_1,*cloud_input) == -1)
+    // {
+    //     PCL_ERROR("Couldn't read file test_pcd.pcd");
+    //     return -1;
+    // }
+    // if(pcl::io::loadPCDFile<pcl::PointXYZ>(file_name_2,*cloud_target) == -1)
+    // {
+    //     PCL_ERROR("Couldn't read file test_pcd.pcd");
+    //     return -1;
+    // }
+    // laserCloudHandler(*cloud_input);
+    // findPlaneCorrPoint(cloud_input,cloud_target);
+
+
+    // ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/kitti/velo/pointcloud", 100, laserCloudHandler);
+
+    // pubLaserCloud = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
+
+    // pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 100);
+
+    // pubCornerPointsLessSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 100);
+
+    // pubSurfPointsFlat = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_flat", 100);
+
+    // pubSurfPointsLessFlat = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_flat", 100);
+
+    // pubRemovePoints = nh.advertise<sensor_msgs::PointCloud2>("/laser_remove_points", 100);
+
+    // if(PUB_EACH_LINE)
+    // {
+    //     for(int i = 0; i < N_SCANS; i++)
+    //     {
+    //         ros::Publisher tmp = nh.advertise<sensor_msgs::PointCloud2>("/laser_scanid_" + std::to_string(i), 100);
+    //         pubEachScan.push_back(tmp);
+    //     }
+    // }
+
+//     ros::spin();
+
+//     return 0;
+// }
